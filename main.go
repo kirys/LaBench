@@ -32,30 +32,35 @@ type ChatRequest struct {
 }
 
 type ChatResponse struct {
-	Choices []struct {
-		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+Choices []struct {
+	Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	} `json:"message"`
+} `json:"choices"`
+Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+} `json:"usage"`
+Timings struct {
+	PromptPerSecond   float64 `json:"prompt_per_second"`
+	PredictedPerSecond float64 `json:"predicted_per_second"`
+} `json:"timings"`
 }
 
 type TestResult struct {
 	Name       string
 	Duration   time.Duration
-	Status     string // "ok" | "error"
+	Status     string
 	ErrMsg     string
 	PromptTok  int
 	RespTok    int
 	TokPerSec  float64
+	PrefillTok float64 // prompt_per_second (server-reported)
+	DecodeTok  float64 // predicted_per_second (server-reported)
 	RespBytes  int
 }
-
 // ─── Test Execution ───────────────────────────────────────────────────────────
 
 func runTest(client *http.Client, endpoint, model, prompt string, maxTokens int, verbose bool) TestResult {
@@ -116,8 +121,14 @@ func runTest(client *http.Client, endpoint, model, prompt string, maxTokens int,
 
 	res.PromptTok = chatResp.Usage.PromptTokens
 	res.RespTok = chatResp.Usage.CompletionTokens
+	res.PrefillTok = chatResp.Timings.PromptPerSecond
+	res.DecodeTok = chatResp.Timings.PredictedPerSecond
 	if res.Duration > 0 && res.RespTok > 0 {
 		res.TokPerSec = float64(res.RespTok) / res.Duration.Seconds()
+		// Fallback for servers that don't report timings (e.g. non-llama.cpp)
+		if res.DecodeTok == 0 {
+			res.DecodeTok = res.TokPerSec
+		}
 	}
 
 	if verbose && len(chatResp.Choices) > 0 {
@@ -132,10 +143,9 @@ func runTest(client *http.Client, endpoint, model, prompt string, maxTokens int,
 // ─── Reporting ────────────────────────────────────────────────────────────────
 
 func printReport(results []TestResult, wallClock time.Duration) {
-	const hdr = "  %-30s %8s  %6s  %6s  %7s  %s"
-	fmt.Printf(hdr, "TEST", "DUR(ms)", "P.TOK", "C.TOK", "TOK/s", "STATUS")
-	fmt.Printf("  %s\n", strings.Repeat("─", 72))
-
+	const hdr = "  %-30s %8s  %6s  %6s  %8s  %8s  %s"
+	fmt.Printf(hdr, "TEST", "DUR(ms)", "P.TOK", "C.TOK", "PREFILL", "DECODE", "STATUS")
+	fmt.Println()
 	var okCount, errCount int
 	var totalPromptTok, totalCompTok int
 	var maxDur, minDur time.Duration
@@ -159,9 +169,9 @@ func printReport(results []TestResult, wallClock time.Duration) {
 		}
 
 		durMs := r.Duration.Milliseconds()
-		fmt.Printf("  %-30s %8d  %6d  %6d  %7.1f  %s",
-			truncate(r.Name, 30), durMs, r.PromptTok, r.RespTok, r.TokPerSec,
-			statusStr(r),
+		fmt.Printf("  %-30s %8d  %6d  %6d  %7.1f t/s  %7.1f t/s  %s",
+			   truncate(r.Name, 30), durMs, r.PromptTok, r.RespTok, r.PrefillTok, r.DecodeTok,
+			   statusStr(r),
 		)
 		if r.Status == "error" {
 			fmt.Printf("  %s", truncate(r.ErrMsg, 60))
