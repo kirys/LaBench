@@ -143,7 +143,7 @@ func runTest(client *http.Client, endpoint, model, prompt string, maxTokens int,
 // ─── Reporting ────────────────────────────────────────────────────────────────
 
 func printReport(results []TestResult, wallClock time.Duration) {
-	const hdr = "  %-30s %8s  %6s  %6s  %8s  %8s  %s"
+	const hdr = "  %-30s %8s  %6s  %6s  %10s  %10s  %9s"
 	fmt.Printf(hdr, "TEST", "DUR(ms)", "P.TOK", "C.TOK", "PREFILL", "DECODE", "STATUS")
 	fmt.Println()
 	var okCount, errCount int
@@ -169,7 +169,7 @@ func printReport(results []TestResult, wallClock time.Duration) {
 		}
 
 		durMs := r.Duration.Milliseconds()
-		fmt.Printf("  %-30s %8d  %6d  %6d  %7.1f t/s  %7.1f t/s  %s",
+		fmt.Printf("  %-30s %8d  %6d  %6d  %10.1f  %10.1f  %9s",
 			   truncate(r.Name, 30), durMs, r.PromptTok, r.RespTok, r.PrefillTok, r.DecodeTok,
 			   statusStr(r),
 		)
@@ -179,7 +179,7 @@ func printReport(results []TestResult, wallClock time.Duration) {
 		fmt.Println()
 	}
 
-	fmt.Printf("  %s\n", strings.Repeat("─", 72))
+	fmt.Printf("  %s\n", strings.Repeat("─", 84))
 	fmt.Println()
 	fmt.Printf("  Tests:          %d total  (%d ok, %d errors)\n", len(results), okCount, errCount)
 	fmt.Printf("  Wall clock:     %s\n", wallClock.Round(time.Millisecond))
@@ -288,7 +288,9 @@ func main() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[idx] = runTest(client, endpoint, *model, tc.prompt, *maxTok, *verbose)
+			r := runTest(client, endpoint, *model, tc.prompt, *maxTok, *verbose)
+			r.Name = tc.name
+			results[idx] = r
 		}(i, t)
 	}
 	wg.Wait()
